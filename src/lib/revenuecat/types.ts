@@ -15,13 +15,14 @@ export type NormalizedDailySnapshot = {
   activeProSubscribers: number;
   mrrCents: number;
   arrCents: number;
-  revenue28dCents: number;
-  proceeds28dCents: number;
-  newPaidSubscribers28d: number;
-  churnedSubscribers28d: number;
-  netNewSubscribers28d: number;
+  /** Null when RevenueCat overview/charts did not supply this metric. */
+  revenue28dCents: number | null;
+  proceeds28dCents: number | null;
+  newPaidSubscribers28d: number | null;
+  churnedSubscribers28d: number | null;
+  netNewSubscribers28d: number | null;
   monthlyChurnRate: number | null;
-  trialStarts28d: number;
+  trialStarts28d: number | null;
   trialConversionRate: number | null;
   annualPlanMix: number | null;
   rawPayload?: Record<string, unknown>;

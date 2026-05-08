@@ -61,7 +61,8 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 
 1. Create a Supabase project.
 2. Run SQL from `supabase/migrations/20250507000000_revenuecat_kpi_tables.sql` in the SQL editor (or use Supabase CLI migrations).
-3. RLS is enabled on all four tables with **no** grants to `anon` / `authenticated` in this migration — only the **service role** (used server-side) can read/write.
+3. Run `supabase/migrations/20250508000000_snapshot_nullable_optional_metrics.sql` so snapshot columns that RevenueCat may omit can be stored as `NULL` (the UI shows an em dash instead of a fake zero).
+4. RLS is enabled on all four tables with **no** grants to `anon` / `authenticated` in this migration — only the **service role** (used server-side) can read/write.
 
 Tables:
 
@@ -98,7 +99,34 @@ This runs `scripts/seed-mock.ts`, which calls the same `syncFromMock` path as th
 Sync behavior:
 
 - If **no** `REVENUECAT_API_KEY` / `REVENUECAT_SECRET_API_KEY`, scheduled and admin syncs run **`syncFromMock`** (still writes to Supabase).
-- If the key is set, **`syncFromRevenueCat`** runs (best-effort `metrics/overview` endpoint; see `src/lib/revenuecat/client.ts`). Adjust mapping when RevenueCat changes their API.
+- If the key is set, **`syncFromRevenueCat`** runs: it calls **`GET /v2/projects/{id}/metrics/overview`** plus several **Charts** endpoints (same API key; see [RevenueCat API v2](https://www.revenuecat.com/docs/api-v2)) and merges results into one daily snapshot. `raw_payload` stores the overview response and slimmed chart metadata for debugging.
+
+### Production checklist (live RevenueCat)
+
+1. In **Vercel → Settings → Environment Variables**, set for **Production**:
+   - `REVENUECAT_API_KEY` (or `REVENUECAT_SECRET_API_KEY`)
+   - `REVENUECAT_PROJECT_ID` (the `proj…` id from the RevenueCat dashboard / API)
+2. **Redeploy** (or wait for the next deploy) so the server sees the new vars.
+3. Trigger **Refresh data** on the Overview page once.
+4. In Supabase, open `revenuecat_daily_snapshots` → latest row → **`raw_payload`**. Confirm `overview_response.metrics` is an array of `{ id, value, unit }` objects. If shapes differ, update [`src/lib/revenuecat/overview-map.ts`](src/lib/revenuecat/overview-map.ts).
+
+**Charts rate limit:** the Charts & Metrics domain is limited (commonly **15 requests/minute** per project). One sync issues several chart calls in parallel; if you hit `429`, wait a minute and refresh again, or reduce chart calls in [`src/lib/revenuecat/sync.ts`](src/lib/revenuecat/sync.ts).
+
+### KPI → RevenueCat mapping (live sync)
+
+| Dashboard field | Primary source | Fallback / notes |
+|-----------------|----------------|-------------------|
+| Active subscribers | Overview metric ids `active_subscriptions`, `active_subscribers` | Chart `actives` (latest point) |
+| MRR (cents) | Overview `mrr`, `monthly_recurring_revenue` | Values treated as **USD major units × 100** unless very large integers (then assumed cents). |
+| ARR (cents) | Overview `arr`, `annual_recurring_revenue` | Chart `arr` summary; else **MRR × 12**. |
+| Revenue 28d (cents) | Overview revenue-style ids | Chart `revenue` + selectors `{ "revenue_type": "gross" }`, last **28** daily points summed (USD → cents). |
+| Proceeds 28d (cents) | Overview proceeds ids | Chart `revenue` + `{ "revenue_type": "proceeds" }`. |
+| New / churn / net (28d) | Overview `new_customers`, `churned_subscribers`, etc. when present | `customers_new` chart (28d sum) fills **new** only; churn may stay null if RC does not expose it on overview. |
+| Monthly churn rate | Overview churn-style ids | Chart `churn` (first parsable rate in `summary` or series). |
+| Trial starts (28d) | Overview `trial_starts_28d`, `trial_starts`, … | Not inferred from `active_trials`. |
+| Trial conversion | Overview | Chart `conversion_to_paying` + selector `{ "conversion_timeframe": "28_days" }`. |
+| Annual plan mix | Overview | Often absent — UI shows **—** until RC exposes a matching metric. |
+| Subscriber **events** / **status** / **cohorts** (live) | — | Still **not** populated from REST in this build (mock seed only). Use RevenueCat dashboard or webhooks for full fidelity there. |
 
 ## Vercel deployment
 
@@ -118,4 +146,4 @@ Sync behavior:
 
 ## RevenueCat API note
 
-The REST surface changes over time. The live client targets a single overview-style URL; raw JSON is also folded into `raw_payload` on snapshots when using live mapping extensions. Extend `mapLiveRevenueCatToPayload` / `mapOverviewToSnapshot` for your exact metrics.
+The REST surface changes over time. Parsing lives in [`src/lib/revenuecat/overview-map.ts`](src/lib/revenuecat/overview-map.ts) (overview `metrics[]` by `id`) and [`src/lib/revenuecat/chart-helpers.ts`](src/lib/revenuecat/chart-helpers.ts) + [`src/lib/revenuecat/sync.ts`](src/lib/revenuecat/sync.ts) (chart merges). Extend those files when RevenueCat adds or renames metric ids. Inspect `revenuecat_daily_snapshots.raw_payload` after each sync to validate shapes in your project.

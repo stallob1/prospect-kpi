@@ -2,7 +2,7 @@ import { LineChart } from "@/components/charts/LineChart";
 import { SimpleBarChart } from "@/components/charts/SimpleBarChart";
 import { KpiCard } from "@/components/kpi/KpiCard";
 import { ConfigBanner } from "@/components/layout/ConfigBanner";
-import { formatCents, formatPercent } from "@/lib/format";
+import { formatCents, formatCentsOptional, formatPercent } from "@/lib/format";
 import { fetchLatestSnapshot, fetchSnapshotsRange, getServiceSupabase } from "@/lib/supabase/server";
 
 export default async function RevenuePage() {
@@ -24,13 +24,16 @@ export default async function RevenuePage() {
     value: Math.round(s.mrr_cents / 100),
   }));
 
-  const barData = latest
-    ? [
-        { name: "Revenue 28d", value: Math.round(latest.revenue_28d_cents / 100) },
-        { name: "Proceeds 28d", value: Math.round(latest.proceeds_28d_cents / 100) },
-        { name: "MRR", value: Math.round(latest.mrr_cents / 100) },
-      ]
-    : [];
+  const barData: { name: string; value: number }[] = [];
+  if (latest) {
+    if (latest.revenue_28d_cents != null) {
+      barData.push({ name: "Revenue 28d", value: Math.round(latest.revenue_28d_cents / 100) });
+    }
+    if (latest.proceeds_28d_cents != null) {
+      barData.push({ name: "Proceeds 28d", value: Math.round(latest.proceeds_28d_cents / 100) });
+    }
+    barData.push({ name: "MRR", value: Math.round(latest.mrr_cents / 100) });
+  }
 
   return (
     <div className="space-y-8">
@@ -47,8 +50,8 @@ export default async function RevenuePage() {
         <>
           <div className="grid gap-4 sm:grid-cols-3">
             <KpiCard title="MRR" value={formatCents(latest.mrr_cents)} />
-            <KpiCard title="Revenue (28d)" value={formatCents(latest.revenue_28d_cents)} />
-            <KpiCard title="Proceeds (28d)" value={formatCents(latest.proceeds_28d_cents)} />
+            <KpiCard title="Revenue (28d)" value={formatCentsOptional(latest.revenue_28d_cents)} />
+            <KpiCard title="Proceeds (28d)" value={formatCentsOptional(latest.proceeds_28d_cents)} />
             <KpiCard
               title="Annual plan mix"
               value={formatPercent(latest.annual_plan_mix, 0)}

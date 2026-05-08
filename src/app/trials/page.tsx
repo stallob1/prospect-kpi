@@ -1,7 +1,7 @@
 import { LineChart } from "@/components/charts/LineChart";
 import { KpiCard } from "@/components/kpi/KpiCard";
 import { ConfigBanner } from "@/components/layout/ConfigBanner";
-import { formatNumber, formatPercent } from "@/lib/format";
+import { formatNumber, formatNumberOptional, formatPercent } from "@/lib/format";
 import { fetchLatestSnapshot, fetchSnapshotsRange, getServiceSupabase } from "@/lib/supabase/server";
 
 export default async function TrialsPage() {
@@ -20,7 +20,7 @@ export default async function TrialsPage() {
 
   const trialStarts = series.map((s) => ({
     label: s.snapshot_date.slice(5),
-    value: s.trial_starts_28d,
+    value: s.trial_starts_28d ?? 0,
   }));
 
   const conv = series.map((s) => ({
@@ -44,7 +44,7 @@ export default async function TrialsPage() {
           <div className="grid gap-4 sm:grid-cols-3">
             <KpiCard
               title="Trial starts (28d)"
-              value={formatNumber(latest.trial_starts_28d)}
+              value={formatNumberOptional(latest.trial_starts_28d)}
             />
             <KpiCard
               title="Trial conversion"

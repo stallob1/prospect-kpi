@@ -1,7 +1,13 @@
 import { KpiCard } from "@/components/kpi/KpiCard";
 import { ConfigBanner } from "@/components/layout/ConfigBanner";
 import { RefreshDataButton } from "@/components/overview/RefreshDataButton";
-import { formatCents, formatNumber, formatPercent } from "@/lib/format";
+import {
+  formatCents,
+  formatCentsOptional,
+  formatNumber,
+  formatNumberOptional,
+  formatPercent,
+} from "@/lib/format";
 import { fetchLatestSnapshot, getServiceSupabase } from "@/lib/supabase/server";
 
 export default async function OverviewPage() {
@@ -65,28 +71,28 @@ export default async function OverviewPage() {
           />
           <KpiCard
             title="Net new (28d)"
-            value={formatNumber(latest.net_new_subscribers_28d)}
-            subtitle={`New ${formatNumber(latest.new_paid_subscribers_28d)} · Churned ${formatNumber(latest.churned_subscribers_28d)}`}
+            value={formatNumberOptional(latest.net_new_subscribers_28d)}
+            subtitle={`New ${formatNumberOptional(latest.new_paid_subscribers_28d)} · Churned ${formatNumberOptional(latest.churned_subscribers_28d)}`}
           />
           <KpiCard
             title="Monthly churn"
-            value={formatPercent(latest.monthly_churn_rate ?? 0, 2)}
-            subtitle="Share of base (snapshot field)"
+            value={formatPercent(latest.monthly_churn_rate, 2)}
+            subtitle="From RevenueCat when available"
           />
           <KpiCard
             title="Trial conversion"
             value={formatPercent(latest.trial_conversion_rate, 1)}
-            subtitle={`${formatNumber(latest.trial_starts_28d)} trial starts (28d)`}
+            subtitle={`${formatNumberOptional(latest.trial_starts_28d)} trial starts (28d)`}
           />
           <KpiCard
             title="Annual plan mix"
             value={formatPercent(latest.annual_plan_mix, 0)}
-            subtitle="Share on annual vs monthly (modeled)"
+            subtitle="From RevenueCat overview when exposed"
           />
           <KpiCard
             title="Revenue (28d)"
-            value={formatCents(latest.revenue_28d_cents)}
-            subtitle={`Proceeds ${formatCents(latest.proceeds_28d_cents)}`}
+            value={formatCentsOptional(latest.revenue_28d_cents)}
+            subtitle={`Proceeds ${formatCentsOptional(latest.proceeds_28d_cents)}`}
           />
         </div>
       )}

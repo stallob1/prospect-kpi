@@ -1,49 +1,152 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { fetchRevenueCatOverviewJson } from "./client";
+import {
+  chartCountFromSeriesOrSummary,
+  chartMoneyCentsFromUSDPointsOrSummary,
+  chartRateMetric,
+  chartSummaryFirstNumber,
+} from "./chart-helpers";
+import { fetchRevenueCatChartJson, fetchRevenueCatOverviewJson } from "./client";
 import { buildMockSyncPayload } from "./mock";
-import type { NormalizedSyncPayload, SyncSummary } from "./types";
+import {
+  mapOverviewBodyToFields,
+  type OverviewSnapshotFields,
+} from "./overview-map";
+import type { NormalizedDailySnapshot, NormalizedSyncPayload, SyncSummary } from "./types";
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function mapOverviewToSnapshot(body: unknown) {
-  const b = body as Record<string, unknown> | null;
-  const metrics =
-    (b?.metrics as Record<string, unknown> | undefined) ??
-    (b?.data as Record<string, unknown> | undefined) ??
-    b ??
-    {};
-  const mrr =
-    Number(metrics.mrr ?? metrics.mrr_usd ?? metrics.monthly_recurring_revenue ?? 0) || 0;
-  const active =
-    Number(
-      metrics.active_subscriptions ??
-        metrics.active_subscribers ??
-        metrics.active ??
-        0,
-    ) || 0;
-  const trials =
-    Number(metrics.active_trials ?? metrics.trials ?? 0) || 0;
-
-  const mrrCents = Math.round(mrr * 100);
-  const snapshotDate = todayIso();
+function mergeOverviewAndCharts(
+  overview: OverviewSnapshotFields,
+  charts: Partial<OverviewSnapshotFields>,
+): OverviewSnapshotFields {
+  const pick = <K extends keyof OverviewSnapshotFields>(
+    k: K,
+  ): OverviewSnapshotFields[K] => {
+    const a = overview[k];
+    if (a != null) return a;
+    const b = charts[k];
+    if (b != null) return b;
+    return null as OverviewSnapshotFields[K];
+  };
 
   return {
-    snapshotDate,
-    activeProSubscribers: Math.round(active),
-    mrrCents,
-    arrCents: mrrCents * 12,
-    revenue28dCents: Math.round(mrrCents * 1.1),
-    proceeds28dCents: Math.round(mrrCents * 0.85),
-    newPaidSubscribers28d: Math.round(active * 0.04),
-    churnedSubscribers28d: Math.round(active * 0.03),
-    netNewSubscribers28d: Math.round(active * 0.01),
-    monthlyChurnRate: Number(metrics.churn_rate ?? 0.03) || 0.03,
-    trialStarts28d: Math.round(trials * 10),
-    trialConversionRate: 0.25,
-    annualPlanMix: 0.42,
-    rawPayload: typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {},
+    activeProSubscribers: pick("activeProSubscribers"),
+    mrrCents: pick("mrrCents"),
+    arrCents: pick("arrCents"),
+    revenue28dCents: pick("revenue28dCents"),
+    proceeds28dCents: pick("proceeds28dCents"),
+    newPaidSubscribers28d: pick("newPaidSubscribers28d"),
+    churnedSubscribers28d: pick("churnedSubscribers28d"),
+    netNewSubscribers28d: pick("netNewSubscribers28d"),
+    monthlyChurnRate: pick("monthlyChurnRate"),
+    trialStarts28d: pick("trialStarts28d"),
+    trialConversionRate: pick("trialConversionRate"),
+    annualPlanMix: pick("annualPlanMix"),
+  };
+}
+
+function slimChartBody(body: unknown): Record<string, unknown> {
+  if (!body || typeof body !== "object") return { error: "empty" };
+  const o = body as Record<string, unknown>;
+  return {
+    object: o.object,
+    display_name: o.display_name,
+    category: o.category,
+    last_computed_at: o.last_computed_at,
+    summary: o.summary,
+    yaxis_currency: o.yaxis_currency,
+  };
+}
+
+async function loadChartAugments(errors: string[]): Promise<{
+  fields: Partial<OverviewSnapshotFields>;
+  chartDebug: Record<string, unknown>;
+}> {
+  const fields: Partial<OverviewSnapshotFields> = {};
+  const chartDebug: Record<string, unknown> = {};
+
+  const run = async (
+    key: string,
+    chartName: string,
+    query: Record<string, string | undefined>,
+    apply: (body: unknown) => void,
+  ) => {
+    const res = await fetchRevenueCatChartJson(chartName, query);
+    if (!res.ok) {
+      errors.push(res.error);
+      chartDebug[key] = { error: res.error };
+      return;
+    }
+    chartDebug[key] = slimChartBody(res.body);
+    apply(res.body);
+  };
+
+  await Promise.all([
+    run("revenue_gross_28d", "revenue", { currency: "USD", selectors: JSON.stringify({ revenue_type: "gross" }) }, (body) => {
+      const cents = chartMoneyCentsFromUSDPointsOrSummary(body, 28);
+      if (cents != null) fields.revenue28dCents = cents;
+    }),
+    run("revenue_proceeds_28d", "revenue", { currency: "USD", selectors: JSON.stringify({ revenue_type: "proceeds" }) }, (body) => {
+      const cents = chartMoneyCentsFromUSDPointsOrSummary(body, 28);
+      if (cents != null) fields.proceeds28dCents = cents;
+    }),
+    run("conversion_to_paying", "conversion_to_paying", { currency: "USD", selectors: JSON.stringify({ conversion_timeframe: "28_days" }) }, (body) => {
+      const r = chartRateMetric(body);
+      if (r != null) fields.trialConversionRate = r;
+    }),
+    run("churn", "churn", { currency: "USD" }, (body) => {
+      const r = chartRateMetric(body);
+      if (r != null) fields.monthlyChurnRate = r;
+    }),
+    run("customers_new", "customers_new", { currency: "USD" }, (body) => {
+      const n = chartCountFromSeriesOrSummary(body, 28);
+      if (n != null) fields.newPaidSubscribers28d = n;
+    }),
+    run("actives", "actives", { currency: "USD" }, (body) => {
+      const n = chartCountFromSeriesOrSummary(body, 1);
+      if (n != null) fields.activeProSubscribers = n;
+    }),
+    run("arr", "arr", { currency: "USD" }, (body) => {
+      const s = chartSummaryFirstNumber(body);
+      if (s != null && Number.isFinite(s)) {
+        fields.arrCents = Math.round(s * 100);
+      }
+    }),
+  ]);
+
+  return { fields, chartDebug };
+}
+
+function toNormalizedDailySnapshot(
+  merged: OverviewSnapshotFields,
+  rawPayload: Record<string, unknown>,
+): NormalizedDailySnapshot {
+  const active = merged.activeProSubscribers ?? 0;
+  const mrr = merged.mrrCents ?? 0;
+  const arr = merged.arrCents ?? (mrr > 0 ? mrr * 12 : 0);
+
+  let netNew = merged.netNewSubscribers28d;
+  if (netNew == null && merged.newPaidSubscribers28d != null && merged.churnedSubscribers28d != null) {
+    netNew = merged.newPaidSubscribers28d - merged.churnedSubscribers28d;
+  }
+
+  return {
+    snapshotDate: todayIso(),
+    activeProSubscribers: active,
+    mrrCents: mrr,
+    arrCents: arr,
+    revenue28dCents: merged.revenue28dCents,
+    proceeds28dCents: merged.proceeds28dCents,
+    newPaidSubscribers28d: merged.newPaidSubscribers28d,
+    churnedSubscribers28d: merged.churnedSubscribers28d,
+    netNewSubscribers28d: netNew,
+    monthlyChurnRate: merged.monthlyChurnRate,
+    trialStarts28d: merged.trialStarts28d,
+    trialConversionRate: merged.trialConversionRate,
+    annualPlanMix: merged.annualPlanMix,
+    rawPayload,
   };
 }
 
@@ -61,7 +164,21 @@ export async function mapLiveRevenueCatToPayload(): Promise<{
     };
   }
 
-  const snap = mapOverviewToSnapshot(res.body);
+  const overviewFields = mapOverviewBodyToFields(res.body);
+  const { fields: chartFields, chartDebug } = await loadChartAugments(errors);
+  const merged = mergeOverviewAndCharts(overviewFields, chartFields);
+
+  const rawPayload: Record<string, unknown> = {
+    overview_response: res.body,
+    chart_ingest: chartDebug,
+    _ingest: {
+      version: 2,
+      merged_at: new Date().toISOString(),
+      source: "revenuecat",
+    },
+  };
+
+  const snap = toNormalizedDailySnapshot(merged, rawPayload);
   return {
     payload: {
       snapshots: [snap],
