@@ -24,7 +24,10 @@ export async function fetchLatestSnapshot(
     .order("snapshot_date", { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (error) throw error;
+  if (error) {
+    console.error("fetchLatestSnapshot failed", error.message);
+    return null;
+  }
   return data as DailySnapshotRow | null;
 }
 
@@ -40,7 +43,10 @@ export async function fetchSnapshotsRange(
     .select("*")
     .gte("snapshot_date", sinceStr)
     .order("snapshot_date", { ascending: true });
-  if (error) throw error;
+  if (error) {
+    console.error("fetchSnapshotsRange failed", error.message);
+    return [];
+  }
   return (data ?? []) as DailySnapshotRow[];
 }
 
@@ -53,7 +59,10 @@ export async function fetchRecentEvents(
     .select("*")
     .order("event_date", { ascending: false })
     .limit(limit);
-  if (error) throw error;
+  if (error) {
+    console.error("fetchRecentEvents failed", error.message);
+    return [];
+  }
   return (data ?? []) as SubscriberEventRow[];
 }
 
@@ -66,7 +75,10 @@ export async function fetchSubscriberStatusSample(
     .select("*")
     .order("last_seen_at", { ascending: false })
     .limit(limit);
-  if (error) throw error;
+  if (error) {
+    console.error("fetchSubscriberStatusSample failed", error.message);
+    return [];
+  }
   return (data ?? []) as SubscriberStatusRow[];
 }
 
@@ -78,6 +90,9 @@ export async function fetchCohorts(
     .select("*")
     .order("signup_month", { ascending: false })
     .order("relative_month", { ascending: true });
-  if (error) throw error;
+  if (error) {
+    console.error("fetchCohorts failed", error.message);
+    return [];
+  }
   return (data ?? []) as CohortRow[];
 }
